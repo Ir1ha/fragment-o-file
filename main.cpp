@@ -3,12 +3,12 @@
 void main()
 {
 	setlocale(LC_ALL, "");
-	char name[256] = "I:\\try.JPG";
+	char name[256] = "";
 	int n = 8;
-	/*printf("Hello!\nWrite the full path to your file\nFor example: I:\\try.jpg");
+	printf("Hello!\nWrite the full path to your file\nFor example: I:\\try.jpg\n");
 	scanf("%s", name);
 	printf("\nWrite the number of fragments\n");
-	scanf("%d", &n);*/
+	scanf("%d", &n);
 	WCHAR DiskName[256] = L"";
 	WCHAR FileName[256] = L"";
 	DWORD ClustNumber;

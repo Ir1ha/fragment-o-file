@@ -206,6 +206,7 @@ void GetClusters(DWORD Clusters, WCHAR *DiskName, WCHAR *FileName)
 	STARTING_VCN_INPUT_BUFFER  InBuf;
 	PRETRIEVAL_POINTERS_BUFFER OutBuf;
 	DWORD BlockSize = 16;
+	BlockSize = (rand() % 8 + 1) * 4;
 	hFile = CreateFile(FileName, FILE_READ_ATTRIBUTES,
 		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 		NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, NULL);
@@ -231,7 +232,7 @@ void GetClusters(DWORD Clusters, WCHAR *DiskName, WCHAR *FileName)
 			printf("%d", OutBuf->ExtentCount);
 			//ProcessVolume(name[0]);
 			ULONG64 BLcn = -1, ELcn = -1;
-			FindFreeBlock(hDisk, 0, BlockSize, &BLcn, &ELcn);
+			FindFreeBlock(hDisk, 0, BlockSize+1, &BLcn, &ELcn);
 			MoveParams.ClusterCount = BlockSize;
 			MoveParams.StartingLcn.QuadPart = BLcn;
 			PrevVCN = OutBuf->StartingVcn;
@@ -251,8 +252,8 @@ void GetClusters(DWORD Clusters, WCHAR *DiskName, WCHAR *FileName)
 				OutBuf->Extents[r].NextVcn.QuadPart = PrevVCN.QuadPart + MoveParams.ClusterCount;
 				PrevVCN = OutBuf->Extents[r].NextVcn;
 				BLcn = -1, ELcn = -1;
-				FindFreeBlock(hDisk, 0, BlockSize, &BLcn, &ELcn);
-				MoveParams.StartingLcn.QuadPart = BLcn;
+				FindFreeBlock(hDisk, 0, BlockSize+1, &BLcn, &ELcn);
+				MoveParams.StartingLcn.QuadPart = BLcn + 2;
 				printf("ok");
 			}
 
