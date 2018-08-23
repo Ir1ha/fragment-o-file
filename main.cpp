@@ -4,7 +4,7 @@ void main()
 {
 	setlocale(LC_ALL, "");
 	char name[256] = "I:\\try.JPG";
-	int n = 2;
+	int n = 8;
 	/*printf("Hello!\nWrite the full path to your file\nFor example: I:\\try.jpg");
 	scanf("%s", name);
 	printf("\nWrite the number of fragments\n");

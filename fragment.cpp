@@ -205,7 +205,7 @@ void GetClusters(DWORD Clusters, WCHAR *DiskName, WCHAR *FileName)
 	LARGE_INTEGER PrevVCN;
 	STARTING_VCN_INPUT_BUFFER  InBuf;
 	PRETRIEVAL_POINTERS_BUFFER OutBuf;
-
+	DWORD BlockSize = 16;
 	hFile = CreateFile(FileName, FILE_READ_ATTRIBUTES,
 		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 		NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, NULL);
@@ -221,16 +221,18 @@ void GetClusters(DWORD Clusters, WCHAR *DiskName, WCHAR *FileName)
 
 		//22.08
 		OutSize = (ULONG)sizeof(RETRIEVAL_POINTERS_BUFFER) + (FileSize.QuadPart / ClusterSize) * sizeof(OutBuf->Extents);
-		OutBuf = (PRETRIEVAL_POINTERS_BUFFER)malloc(OutSize + 1);
+		
+		//OutSize = Clusters;
+		OutBuf = (PRETRIEVAL_POINTERS_BUFFER)malloc(OutSize);
 		InBuf.StartingVcn.QuadPart = 0;
 		if (DeviceIoControl(hFile, FSCTL_GET_RETRIEVAL_POINTERS, &InBuf, sizeof(InBuf), OutBuf, OutSize, &Bytes, NULL))
 		{
 			ClCount = (FileSize.QuadPart + ClusterSize - 1) / ClusterSize;
-
+			printf("%d", OutBuf->ExtentCount);
 			//ProcessVolume(name[0]);
 			ULONG64 BLcn = -1, ELcn = -1;
-			FindFreeBlock(hDisk, 0, 32, &BLcn, &ELcn);
-			MoveParams.ClusterCount = 0;
+			FindFreeBlock(hDisk, 0, BlockSize, &BLcn, &ELcn);
+			MoveParams.ClusterCount = BlockSize;
 			MoveParams.StartingLcn.QuadPart = BLcn;
 			PrevVCN = OutBuf->StartingVcn;
 			size_t k = sizeof(MoveParams);
@@ -239,17 +241,17 @@ void GetClusters(DWORD Clusters, WCHAR *DiskName, WCHAR *FileName)
 			{
 				DWORD br;
 				//MoveParams.ClusterCount = OutBuf->Extents[r].NextVcn.QuadPart - PrevVCN.QuadPart;
-				MoveParams.ClusterCount = 32;
+				//MoveParams.ClusterCount = BlockSize;
 				if (DeviceIoControl(hDisk, FSCTL_MOVE_FILE, &MoveParams, sizeof(MoveParams), NULL, 0, &br, NULL))
 					printf("error %d\n", GetLastError());
 				printf("error %d\n", GetLastError());
 				//MoveParams.StartingLcn.QuadPart = MoveParams.StartingLcn.QuadPart + MoveParams.ClusterCount;
 				MoveParams.StartingVcn.QuadPart = MoveParams.StartingVcn.QuadPart + MoveParams.ClusterCount;
-				//OutBuf->ExtentCount++;
-				//OutBuf->Extents[r].NextVcn.QuadPart = PrevVCN.QuadPart + MoveParams.ClusterCount;
-				//PrevVCN = OutBuf->Extents[r].NextVcn;
+				OutBuf->ExtentCount++;
+				OutBuf->Extents[r].NextVcn.QuadPart = PrevVCN.QuadPart + MoveParams.ClusterCount;
+				PrevVCN = OutBuf->Extents[r].NextVcn;
 				BLcn = -1, ELcn = -1;
-				FindFreeBlock(hDisk, 0, 32, &BLcn, &ELcn);
+				FindFreeBlock(hDisk, 0, BlockSize, &BLcn, &ELcn);
 				MoveParams.StartingLcn.QuadPart = BLcn;
 				printf("ok");
 			}
