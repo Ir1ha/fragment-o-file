@@ -2,13 +2,17 @@
 #include<Windows.h>
 #include "fragment.h"
 
+/*Size of the cluster in the current file system*/
 DWORD ClusterSize;
-ULONG64 MaxLcn;                 /* Highest possible LCN + 1. */
+/* Highest possible LCN + 1. */
+ULONG64 MaxLcn;       
+/* Only for NTFS system*/
 struct {
 	ULONG64 Start;
 	ULONG64 End;
 } Excludes[3];
 
+/*Set names in the special format in order to use in WINAPI functions*/
 DWORD SetFiles(int n, const char *name, WCHAR *DiskName, WCHAR *FileName){
 	DWORD Clust = static_cast<DWORD>(n);
 
@@ -25,6 +29,7 @@ DWORD SetFiles(int n, const char *name, WCHAR *DiskName, WCHAR *FileName){
 	return Clust;
 }
 
+/*Finds the ClusterSize*/
 void Search(const char *name)
 {
 	char k = name[0];
@@ -40,6 +45,7 @@ void Search(const char *name)
 	printf("%d", ClusterSize);
 }
 
+/*Finds the max cluster*/
 void find_max_clus(WCHAR *DiskName){
 	
 	HANDLE VolumeHandle;
@@ -101,10 +107,30 @@ void find_max_clus(WCHAR *DiskName){
 	}
 	MaxLcn = Data.StartingLcn + Data.BitmapSize;
 
+	/* Setup the list of clusters that cannot be used. The Master File
+	Table cannot be moved and cannot be used by files. All this is
+	only necessary for NTFS volumes. */
+	Result = DeviceIoControl(VolumeHandle, FSCTL_GET_NTFS_VOLUME_DATA,
+		NULL, 0, &NtfsData, sizeof(NtfsData), &w, NULL);
+	if (Result != 0) {
+		/* Note: NtfsData.TotalClusters.QuadPart should be exactly the same
+		as the MaxLcn that was determined in the previous block. */
+		Excludes[0].Start = NtfsData.MftStartLcn.QuadPart;
+		Excludes[0].End = NtfsData.MftStartLcn.QuadPart +
+			NtfsData.MftValidDataLength.QuadPart / NtfsData.BytesPerCluster;
+		Excludes[1].Start = NtfsData.MftZoneStart.QuadPart;
+		Excludes[1].End = NtfsData.MftZoneEnd.QuadPart;
+		Excludes[2].Start = NtfsData.Mft2StartLcn.QuadPart;
+		Excludes[2].End = NtfsData.Mft2StartLcn.QuadPart +
+			NtfsData.MftValidDataLength.QuadPart / NtfsData.BytesPerCluster;
+
+		/* Show debug info. */
+	}
 	/* Close the volume handle. */
 	CloseHandle(VolumeHandle);
 }
 
+/*Finds the free memory block of minimumsize*/
 int FindFreeBlock(
 	HANDLE VolumeHandle,
 	ULONG64 MinimumLcn,          /* Cluster must be at or above this LCN. */
@@ -159,6 +185,11 @@ int FindFreeBlock(
 		if (Data.BitmapSize / 8 < IndexMax) IndexMax = (int)(Data.BitmapSize / 8);
 		while (Index < IndexMax) {
 			InUse = (Data.Buffer[Index] & Mask);
+			if (((Lcn >= Excludes[0].Start) && (Lcn < Excludes[0].End)) ||
+				((Lcn >= Excludes[1].Start) && (Lcn < Excludes[1].End)) ||
+				((Lcn >= Excludes[2].Start) && (Lcn < Excludes[2].End))) {
+				InUse = 1;
+			}
 			if ((PrevInUse == 0) && (InUse != 0)) {
 				if ((ClusterStart >= MinimumLcn) &&
 					(Lcn - ClusterStart >= MinimumSize)) {
@@ -193,11 +224,12 @@ int FindFreeBlock(
 	return 0;
 }
 
+/*Moves Cluster of the file*/
 void GetClusters(DWORD Clusters, WCHAR *DiskName, WCHAR *FileName)
 {
 	MOVE_FILE_DATA MoveParams;
 
-	ULONG  ClCount;
+	DWORD  ClCount;
 	LARGE_INTEGER FileSize;
 	HANDLE  hFile;
 	ULONG   OutSize;
@@ -205,8 +237,9 @@ void GetClusters(DWORD Clusters, WCHAR *DiskName, WCHAR *FileName)
 	LARGE_INTEGER PrevVCN;
 	STARTING_VCN_INPUT_BUFFER  InBuf;
 	PRETRIEVAL_POINTERS_BUFFER OutBuf;
-	DWORD BlockSize = 16;
-	BlockSize = (rand() % 8 + 1) * 4;
+	DWORD BlockSize = 0;
+	DWORD ClSumm = 0;
+	srand(time(0));
 	hFile = CreateFile(FileName, FILE_READ_ATTRIBUTES,
 		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 		NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, NULL);
@@ -222,25 +255,29 @@ void GetClusters(DWORD Clusters, WCHAR *DiskName, WCHAR *FileName)
 
 		//22.08
 		OutSize = (ULONG)sizeof(RETRIEVAL_POINTERS_BUFFER) + (FileSize.QuadPart / ClusterSize) * sizeof(OutBuf->Extents);
-		
+
 		//OutSize = Clusters;
 		OutBuf = (PRETRIEVAL_POINTERS_BUFFER)malloc(OutSize);
 		InBuf.StartingVcn.QuadPart = 0;
 		if (DeviceIoControl(hFile, FSCTL_GET_RETRIEVAL_POINTERS, &InBuf, sizeof(InBuf), OutBuf, OutSize, &Bytes, NULL))
 		{
 			ClCount = (FileSize.QuadPart + ClusterSize - 1) / ClusterSize;
+			
 			printf("%d", OutBuf->ExtentCount);
 			//ProcessVolume(name[0]);
 			ULONG64 BLcn = -1, ELcn = -1;
-			FindFreeBlock(hDisk, 0, BlockSize+1, &BLcn, &ELcn);
+			BlockSize = GetNextBlockSize(Clusters, ClCount, ClSumm);
+			FindFreeBlock(hDisk, 0, BlockSize, &BLcn, &ELcn);
 			MoveParams.ClusterCount = BlockSize;
 			MoveParams.StartingLcn.QuadPart = BLcn;
 			PrevVCN = OutBuf->StartingVcn;
 			size_t k = sizeof(MoveParams);
 			MoveParams.StartingVcn.QuadPart = 0;
-			for (ULONG r = 0; r < Clusters; r++)
+			for (DWORD r = 0; r < Clusters; r++)
 			{
 				DWORD br;
+				//srand(time(0));
+				//BlockSize = (rand() % 4 + 1) * 4;
 				//MoveParams.ClusterCount = OutBuf->Extents[r].NextVcn.QuadPart - PrevVCN.QuadPart;
 				//MoveParams.ClusterCount = BlockSize;
 				if (DeviceIoControl(hDisk, FSCTL_MOVE_FILE, &MoveParams, sizeof(MoveParams), NULL, 0, &br, NULL))
@@ -251,9 +288,14 @@ void GetClusters(DWORD Clusters, WCHAR *DiskName, WCHAR *FileName)
 				OutBuf->ExtentCount++;
 				OutBuf->Extents[r].NextVcn.QuadPart = PrevVCN.QuadPart + MoveParams.ClusterCount;
 				PrevVCN = OutBuf->Extents[r].NextVcn;
-				BLcn = -1, ELcn = -1;
-				FindFreeBlock(hDisk, 0, BlockSize+1, &BLcn, &ELcn);
-				MoveParams.StartingLcn.QuadPart = BLcn + 2;
+				ClSumm += MoveParams.ClusterCount;
+				if ((Clusters - r) > 1){
+					BLcn = -1, ELcn = -1;
+					BlockSize = GetNextBlockSize(Clusters - (r + 1), ClCount, ClSumm);
+					FindFreeBlock(hDisk, 0, BlockSize, &BLcn, &ELcn);
+					MoveParams.StartingLcn.QuadPart = BLcn + 1;
+					MoveParams.ClusterCount = BlockSize;
+				}
 				printf("ok");
 			}
 
@@ -262,4 +304,15 @@ void GetClusters(DWORD Clusters, WCHAR *DiskName, WCHAR *FileName)
 		CloseHandle(hFile);
 		CloseHandle(hDisk);
 	}
+}
+
+/*Random BlockSize*/
+DWORD GetNextBlockSize(DWORD Remains, DWORD ClCount, DWORD ClSumm){
+	srand(time(NULL));
+	if (Remains == 1)
+		return (ClCount - ClSumm + 1);
+	int left = 1, right = ClCount - ClSumm - Remains;
+	DWORD ans;
+	ans = static_cast<DWORD>(rand() % right + 1);
+	return ans + 1;
 }
